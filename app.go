@@ -20,6 +20,7 @@ import (
 )
 
 var (
+	sleeptime = 5 * time.Millisecond
 	dbx *sqlx.DB
 	app newrelic.Application
 )
@@ -474,7 +475,7 @@ func getAPIStreamRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Req
 	loop := 6
 	for loop > 0 {
 		loop--
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(sleeptime)
 
 		strokes, err := getStrokes(txn, room.ID, int64(lastStrokeID))
 		if err != nil {
