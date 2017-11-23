@@ -17,6 +17,7 @@ import (
 	"goji.io/pat"
 	"golang.org/x/net/context"
 	"github.com/newrelic/go-agent"
+	"github.com/gorilla/mux"
 )
 
 var (
@@ -677,6 +678,10 @@ func main() {
 
 	config := newrelic.NewConfig("ISUketch", os.Getenv("NEW_RELIC_KEY"))
 	app, err = newrelic.NewApplication(config)
+
+	if err != nil {
+		log.Fatalf("Failed to connect to New Relic:", err)
+	}
 
 	mux := goji.NewMux()
 	mux.HandleFunc(pat.Post("/api/csrf_token"), postAPICsrfToken)
