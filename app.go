@@ -21,6 +21,7 @@ import (
 
 var (
 	sleeptime = 5 * time.Millisecond
+	maxloop = 20
 	dbx *sqlx.DB
 	app newrelic.Application
 )
@@ -472,7 +473,7 @@ func getAPIStreamRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Req
 		lastStrokeID = lastEventID
 	}
 
-	loop := 6
+	loop := maxloop
 	for loop > 0 {
 		loop--
 		time.Sleep(sleeptime)
