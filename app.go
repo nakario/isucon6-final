@@ -16,10 +16,12 @@ import (
 	"goji.io"
 	"goji.io/pat"
 	"golang.org/x/net/context"
+	"github.com/newrelic/go-agent"
 )
 
 var (
 	dbx *sqlx.DB
+	app newrelic.Application
 )
 
 type Token struct {
@@ -183,6 +185,8 @@ func outputError(w http.ResponseWriter, err error) {
 }
 
 func postAPICsrfToken(w http.ResponseWriter, r *http.Request) {
+	txn := app.StartTransaction("postAPICstfToken", w, r)
+	defer txn.End()
 	query := "INSERT INTO `tokens` (`csrf_token`) VALUES"
 	query += " (SHA2(CONCAT(RAND(), UUID_SHORT()), 256))"
 
@@ -216,6 +220,8 @@ func postAPICsrfToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func getAPIRooms(w http.ResponseWriter, r *http.Request) {
+	txn := app.StartTransaction("getAPIRooms", w, r)
+	defer txn.End()
 	query := "SELECT `room_id`, MAX(`id`) AS `max_id` FROM `strokes`"
 	query += " GROUP BY `room_id` ORDER BY `max_id` DESC LIMIT 100"
 
@@ -260,6 +266,8 @@ func getAPIRooms(w http.ResponseWriter, r *http.Request) {
 }
 
 func postAPIRooms(w http.ResponseWriter, r *http.Request) {
+	txn := app.StartTransaction("postAPIRooms", w, r)
+	defer txn.End()
 	t, err := checkToken(r.Header.Get("x-csrf-token"))
 
 	if err != nil {
@@ -327,6 +335,8 @@ func postAPIRooms(w http.ResponseWriter, r *http.Request) {
 }
 
 func getAPIRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	txn := app.StartTransaction("getAPIRoomsID", w, r)
+	defer txn.End()
 	idStr := pat.Param(ctx, "id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -376,6 +386,8 @@ func getAPIRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Request) 
 }
 
 func getAPIStreamRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	txn := app.StartTransaction("getAPIStreamRoomsID", w, r)
+	defer txn.End()
 	w.Header().Set("Content-Type", "text/event-stream")
 
 	idStr := pat.Param(ctx, "id")
@@ -471,6 +483,8 @@ func getAPIStreamRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Req
 }
 
 func postAPIStrokesRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	txn := app.StartTransaction("postAPIStrokesRoomsID", w, r)
+	defer txn.End()
 	t, err := checkToken(r.Header.Get("x-csrf-token"))
 
 	if err != nil {
@@ -623,6 +637,9 @@ func main() {
 		log.Fatalf("Failed to connect to DB: %s.", err.Error())
 	}
 	defer dbx.Close()
+
+	config := newrelic.NewConfig("ISUketch", os.Getenv("NEW_RELIC_KEY"))
+	app, err = newrelic.NewApplication(config)
 
 	mux := goji.NewMux()
 	mux.HandleFunc(pat.Post("/api/csrf_token"), postAPICsrfToken)
