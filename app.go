@@ -17,7 +17,6 @@ import (
 	"goji.io/pat"
 	"golang.org/x/net/context"
 	"github.com/newrelic/go-agent"
-	"github.com/gorilla/mux"
 )
 
 var (
