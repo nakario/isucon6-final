@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"time"
+	"net/http/pprof"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
@@ -689,6 +690,11 @@ func main() {
 	mux.HandleFuncC(pat.Get("/api/rooms/:id"), getAPIRoomsID)
 	mux.HandleFuncC(pat.Get("/api/stream/rooms/:id"), getAPIStreamRoomsID)
 	mux.HandleFuncC(pat.Post("/api/strokes/rooms/:id"), postAPIStrokesRoomsID)
+
+	mux.Handle(pat.Get("/debug/pprof/"), http.HandlerFunc(pprof.Index))
+	mux.Handle(pat.Get("/debug/pprof/cmdline"), http.HandlerFunc(pprof.Cmdline))
+	mux.Handle(pat.Get("/debug/pprof/profile"), http.HandlerFunc(pprof.Profile))
+	mux.Handle(pat.Get("/debug/pprof/symbol"), http.HandlerFunc(pprof.Symbol))
 
 	log.Fatal(http.ListenAndServe("0.0.0.0:80", mux))
 }
