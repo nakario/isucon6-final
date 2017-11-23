@@ -147,7 +147,7 @@ func getStrokes(txn newrelic.Transaction, roomID int64, greaterThanID int64) ([]
 func getRoom(txn newrelic.Transaction, roomID int64) (*Room, error) {
 	query := "SELECT `id`, `name`, `canvas_width`, `canvas_height`, `created_at` FROM `rooms` WHERE `id` = ?"
 	r := &Room{}
-	s := startSQL(txn, "rooms", "GET")
+	s := startSQL(txn, "rooms", "SELECT")
 	err := dbx.Get(r, query, roomID)
 	s.End()
 	if err != nil {
@@ -583,7 +583,7 @@ func postAPIStrokesRoomsID(ctx context.Context, w http.ResponseWriter, r *http.R
 		}
 	}
 
-	seg := startSQL(txn, "strokes, points", "INSERT, SELECT")
+	// seg := startSQL(txn, "strokes, points", "INSERT, SELECT")
 	tx := dbx.MustBegin()
 	query := "INSERT INTO `strokes` (`room_id`, `width`, `red`, `green`, `blue`, `alpha`)"
 	query += " VALUES(?, ?, ?, ?, ?, ?)"
@@ -608,7 +608,7 @@ func postAPIStrokesRoomsID(ctx context.Context, w http.ResponseWriter, r *http.R
 	}
 
 	err = tx.Commit()
-	seg.End()
+	// seg.End()
 	if err != nil {
 		tx.Rollback()
 		outputError(w, err)
