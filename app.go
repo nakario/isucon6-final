@@ -60,6 +60,15 @@ type Room struct {
 	WatcherCount int       `json:"watcher_count"`
 }
 
+func startSQL(txn newrelic.Transaction, collection, operation string) newrelic.DatastoreSegment {
+	return newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: collection,
+		Operation: operation,
+	}
+}
+
 func printAndFlush(w http.ResponseWriter, content string) {
 	fmt.Fprint(w, content)
 
@@ -79,7 +88,7 @@ func printAndFlush(w http.ResponseWriter, content string) {
 	f.Flush()
 }
 
-func checkToken(csrfToken string) (*Token, error) {
+func checkToken(txn newrelic.Transaction, csrfToken string) (*Token, error) {
 	if csrfToken == "" {
 		return nil, nil
 	}
@@ -88,7 +97,9 @@ func checkToken(csrfToken string) (*Token, error) {
 	query += " WHERE `csrf_token` = ? AND `created_at` > CURRENT_TIMESTAMP(6) - INTERVAL 1 DAY"
 
 	t := &Token{}
+	s := startSQL(txn, "tokens", "SELECT")
 	err := dbx.Get(t, query, csrfToken)
+	s.End()
 
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
@@ -101,21 +112,25 @@ func checkToken(csrfToken string) (*Token, error) {
 	return t, nil
 }
 
-func getStrokePoints(strokeID int64) ([]Point, error) {
+func getStrokePoints(txn newrelic.Transaction, strokeID int64) ([]Point, error) {
 	query := "SELECT `id`, `stroke_id`, `x`, `y` FROM `points` WHERE `stroke_id` = ? ORDER BY `id` ASC"
 	ps := []Point{}
+	s := startSQL(txn, "points", "SELECT")
 	err := dbx.Select(&ps, query, strokeID)
+	s.End()
 	if err != nil {
 		return nil, err
 	}
 	return ps, nil
 }
 
-func getStrokes(roomID int64, greaterThanID int64) ([]Stroke, error) {
+func getStrokes(txn newrelic.Transaction, roomID int64, greaterThanID int64) ([]Stroke, error) {
 	query := "SELECT `id`, `room_id`, `width`, `red`, `green`, `blue`, `alpha`, `created_at` FROM `strokes`"
 	query += " WHERE `room_id` = ? AND `id` > ? ORDER BY `id` ASC"
 	strokes := []Stroke{}
+	s := startSQL(txn, "strokes", "SELECT")
 	err := dbx.Select(&strokes, query, roomID, greaterThanID)
+	s.End()
 	if err != nil {
 		return nil, err
 	}
@@ -126,10 +141,12 @@ func getStrokes(roomID int64, greaterThanID int64) ([]Stroke, error) {
 	return strokes, nil
 }
 
-func getRoom(roomID int64) (*Room, error) {
+func getRoom(txn newrelic.Transaction, roomID int64) (*Room, error) {
 	query := "SELECT `id`, `name`, `canvas_width`, `canvas_height`, `created_at` FROM `rooms` WHERE `id` = ?"
 	r := &Room{}
+	s := startSQL(txn, "rooms", "GET")
 	err := dbx.Get(r, query, roomID)
+	s.End()
 	if err != nil {
 		return nil, err
 	}
@@ -138,12 +155,14 @@ func getRoom(roomID int64) (*Room, error) {
 	return r, nil
 }
 
-func getWatcherCount(roomID int64) (int, error) {
+func getWatcherCount(txn newrelic.Transaction, roomID int64) (int, error) {
 	query := "SELECT COUNT(*) AS `watcher_count` FROM `room_watchers`"
 	query += " WHERE `room_id` = ? AND `updated_at` > CURRENT_TIMESTAMP(6) - INTERVAL 3 SECOND"
 
 	var watcherCount int
+	s := startSQL(txn, "watcher_count", "SELECT")
 	err := dbx.QueryRow(query, roomID).Scan(&watcherCount)
+	s.End()
 	if err != nil && err != sql.ErrNoRows {
 		return 0, err
 	}
@@ -153,11 +172,13 @@ func getWatcherCount(roomID int64) (int, error) {
 	return watcherCount, nil
 }
 
-func updateRoomWatcher(roomID int64, tokenID int64) error {
+func updateRoomWatcher(txn newrelic.Transaction, roomID int64, tokenID int64) error {
 	query := "INSERT INTO `room_watchers` (`room_id`, `token_id`) VALUES (?, ?)"
 	query += " ON DUPLICATE KEY UPDATE `updated_at` = CURRENT_TIMESTAMP(6)"
 
+	s := startSQL(txn, "room_watchers", "INSERT")
 	_, err := dbx.Exec(query, roomID, tokenID)
+	s.End()
 	return err
 }
 
@@ -185,12 +206,14 @@ func outputError(w http.ResponseWriter, err error) {
 }
 
 func postAPICsrfToken(w http.ResponseWriter, r *http.Request) {
-	txn := app.StartTransaction("postAPICstfToken", w, r)
+	txn := app.StartTransaction("postAPICsrfToken", w, r)
 	defer txn.End()
 	query := "INSERT INTO `tokens` (`csrf_token`) VALUES"
 	query += " (SHA2(CONCAT(RAND(), UUID_SHORT()), 256))"
 
+	s := startSQL(txn, "tokens", "INSERT")
 	result, err := dbx.Exec(query)
+	s.End()
 	if err != nil {
 		outputError(w, err)
 		return
@@ -204,7 +227,9 @@ func postAPICsrfToken(w http.ResponseWriter, r *http.Request) {
 
 	t := Token{}
 	query = "SELECT `id`, `csrf_token`, `created_at` FROM `tokens` WHERE id = ?"
+	s2 := startSQL(txn, "tokens", "SELECT")
 	err = dbx.Get(&t, query, id)
+	s2.End()
 	if err != nil {
 		outputError(w, err)
 		return
@@ -232,7 +257,9 @@ func getAPIRooms(w http.ResponseWriter, r *http.Request) {
 
 	results := []result{}
 
+	s := startSQL(txn, "strokes", "SELECT")
 	err := dbx.Select(&results, query)
+	s.End()
 	if err != nil {
 		outputError(w, err)
 		return
@@ -241,12 +268,12 @@ func getAPIRooms(w http.ResponseWriter, r *http.Request) {
 	rooms := []*Room{}
 
 	for _, r := range results {
-		room, err := getRoom(r.RoomID)
+		room, err := getRoom(txn, r.RoomID)
 		if err != nil {
 			outputError(w, err)
 			return
 		}
-		s, err := getStrokes(room.ID, 0)
+		s, err := getStrokes(txn, room.ID, 0)
 		if err != nil {
 			outputError(w, err)
 			return
@@ -268,7 +295,7 @@ func getAPIRooms(w http.ResponseWriter, r *http.Request) {
 func postAPIRooms(w http.ResponseWriter, r *http.Request) {
 	txn := app.StartTransaction("postAPIRooms", w, r)
 	defer txn.End()
-	t, err := checkToken(r.Header.Get("x-csrf-token"))
+	t, err := checkToken(txn, r.Header.Get("x-csrf-token"))
 
 	if err != nil {
 		outputError(w, err)
@@ -298,6 +325,7 @@ func postAPIRooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s := startSQL(txn, "rooms", "INSERT")
 	tx := dbx.MustBegin()
 	query := "INSERT INTO `rooms` (`name`, `canvas_width`, `canvas_height`)"
 	query += " VALUES (?, ?, ?)"
@@ -313,13 +341,14 @@ func postAPIRooms(w http.ResponseWriter, r *http.Request) {
 	tx.MustExec(query, roomID, t.ID)
 
 	err = tx.Commit()
+	s.End()
 	if err != nil {
 		tx.Rollback()
 		outputError(w, err)
 		return
 	}
 
-	room, err := getRoom(roomID)
+	room, err := getRoom(txn, roomID)
 	if err != nil {
 		outputError(w, err)
 		return
@@ -344,7 +373,7 @@ func getAPIRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	room, err := getRoom(id)
+	room, err := getRoom(txn, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			outputErrorMsg(w, http.StatusNotFound, "この部屋は存在しません。")
@@ -354,14 +383,14 @@ func getAPIRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	strokes, err := getStrokes(room.ID, 0)
+	strokes, err := getStrokes(txn, room.ID, 0)
 	if err != nil {
 		outputError(w, err)
 		return
 	}
 
 	for i, s := range strokes {
-		p, err := getStrokePoints(s.ID)
+		p, err := getStrokePoints(txn, s.ID)
 		if err != nil {
 			outputError(w, err)
 			return
@@ -370,7 +399,7 @@ func getAPIRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Request) 
 	}
 
 	room.Strokes = strokes
-	room.WatcherCount, err = getWatcherCount(room.ID)
+	room.WatcherCount, err = getWatcherCount(txn, room.ID)
 	if err != nil {
 		outputError(w, err)
 		return
@@ -396,7 +425,7 @@ func getAPIStreamRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	t, err := checkToken(r.URL.Query().Get("csrf_token"))
+	t, err := checkToken(txn, r.URL.Query().Get("csrf_token"))
 
 	if err != nil {
 		outputError(w, err)
@@ -407,7 +436,7 @@ func getAPIStreamRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	room, err := getRoom(id)
+	room, err := getRoom(txn, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			printAndFlush(w, "event:bad_request\n"+"data:この部屋は存在しません\n\n")
@@ -417,13 +446,13 @@ func getAPIStreamRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	err = updateRoomWatcher(room.ID, t.ID)
+	err = updateRoomWatcher(txn, room.ID, t.ID)
 	if err != nil {
 		outputError(w, err)
 		return
 	}
 
-	watcherCount, err := getWatcherCount(room.ID)
+	watcherCount, err := getWatcherCount(txn, room.ID)
 	if err != nil {
 		outputError(w, err)
 		return
@@ -447,14 +476,14 @@ func getAPIStreamRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Req
 		loop--
 		time.Sleep(500 * time.Millisecond)
 
-		strokes, err := getStrokes(room.ID, int64(lastStrokeID))
+		strokes, err := getStrokes(txn, room.ID, int64(lastStrokeID))
 		if err != nil {
 			outputError(w, err)
 			return
 		}
 
 		for _, s := range strokes {
-			s.Points, err = getStrokePoints(s.ID)
+			s.Points, err = getStrokePoints(txn, s.ID)
 			if err != nil {
 				outputError(w, err)
 				return
@@ -464,13 +493,13 @@ func getAPIStreamRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Req
 			lastStrokeID = s.ID
 		}
 
-		err = updateRoomWatcher(room.ID, t.ID)
+		err = updateRoomWatcher(txn, room.ID, t.ID)
 		if err != nil {
 			outputError(w, err)
 			return
 		}
 
-		newWatcherCount, err := getWatcherCount(room.ID)
+		newWatcherCount, err := getWatcherCount(txn, room.ID)
 		if err != nil {
 			outputError(w, err)
 			return
@@ -485,7 +514,7 @@ func getAPIStreamRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Req
 func postAPIStrokesRoomsID(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	txn := app.StartTransaction("postAPIStrokesRoomsID", w, r)
 	defer txn.End()
-	t, err := checkToken(r.Header.Get("x-csrf-token"))
+	t, err := checkToken(txn, r.Header.Get("x-csrf-token"))
 
 	if err != nil {
 		outputError(w, err)
@@ -503,7 +532,7 @@ func postAPIStrokesRoomsID(ctx context.Context, w http.ResponseWriter, r *http.R
 		return
 	}
 
-	room, err := getRoom(id)
+	room, err := getRoom(txn, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			outputErrorMsg(w, http.StatusNotFound, "この部屋は存在しません。")
@@ -530,7 +559,7 @@ func postAPIStrokesRoomsID(ctx context.Context, w http.ResponseWriter, r *http.R
 		return
 	}
 
-	strokes, err := getStrokes(room.ID, 0)
+	strokes, err := getStrokes(txn, room.ID, 0)
 	if err != nil {
 		outputError(w, err)
 		return
@@ -538,7 +567,9 @@ func postAPIStrokesRoomsID(ctx context.Context, w http.ResponseWriter, r *http.R
 	if len(strokes) == 0 {
 		query := "SELECT COUNT(*) AS cnt FROM `room_owners` WHERE `room_id` = ? AND `token_id` = ?"
 		cnt := 0
+		s := startSQL(txn, "room_owners", "SELECT")
 		err = dbx.QueryRow(query, room.ID, t.ID).Scan(&cnt)
+		s.End()
 		if err != nil {
 			outputError(w, err)
 			return
@@ -549,6 +580,7 @@ func postAPIStrokesRoomsID(ctx context.Context, w http.ResponseWriter, r *http.R
 		}
 	}
 
+	seg := startSQL(txn, "strokes, points", "INSERT, SELECT")
 	tx := dbx.MustBegin()
 	query := "INSERT INTO `strokes` (`room_id`, `width`, `red`, `green`, `blue`, `alpha`)"
 	query += " VALUES(?, ?, ?, ?, ?, ?)"
@@ -573,6 +605,7 @@ func postAPIStrokesRoomsID(ctx context.Context, w http.ResponseWriter, r *http.R
 	}
 
 	err = tx.Commit()
+	seg.End()
 	if err != nil {
 		tx.Rollback()
 		outputError(w, err)
@@ -582,13 +615,15 @@ func postAPIStrokesRoomsID(ctx context.Context, w http.ResponseWriter, r *http.R
 	query = "SELECT `id`, `room_id`, `width`, `red`, `green`, `blue`, `alpha`, `created_at` FROM `strokes`"
 	query += " WHERE `id` = ?"
 	s := Stroke{}
+	s2 := startSQL(txn, "strokes", "SELECT")
 	err = dbx.Get(&s, query, strokeID)
+	s2.End()
 	if err != nil {
 		outputError(w, err)
 		return
 	}
 
-	s.Points, err = getStrokePoints(strokeID)
+	s.Points, err = getStrokePoints(txn, strokeID)
 	if err != nil {
 		outputError(w, err)
 		return
